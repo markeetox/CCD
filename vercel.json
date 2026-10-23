@@ -1,0 +1,5 @@
+{
+  "rewrites": [{ "source": "/admin", "destination": "/admin.html" }],
+  "crons": [{ "path": "/api/weekly-digest", "schedule": "0 14 * * 0" }],
+  "functions": { "api/*.js": { "maxDuration": 60 } }
+}

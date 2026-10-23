@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(myEmail())); }
+    function adminChurch() { return get(/databases/$(database)/documents/admins/$(myEmail())).data.churchId; }
+    function isInvited() { return signedIn() && exists(/databases/$(database)/documents/invites/$(myEmail())); }
+    function inviteChurch() { return get(/databases/$(database)/documents/invites/$(myEmail())).data.churchId; }
+
+    // Church admins: you add one document per admin (document ID = lowercase email, field churchId).
+    match /admins/{email} {
+      allow read: if signedIn() && email == myEmail();
+    }
+
+    // Parent invite list. Parents read their own; admins manage their own church's list.
+    match /invites/{email} {
+      allow read: if signedIn() && (email == myEmail() || (isAdmin() && resource.data.churchId == adminChurch()));
+      allow create: if isAdmin() && request.resource.data.churchId == adminChurch();
+      allow update: if isAdmin() && resource.data.churchId == adminChurch() && request.resource.data.churchId == adminChurch();
+      allow delete: if isAdmin() && resource.data.churchId == adminChurch();
+    }
+
+    // One document per child. The parent owns it; admins can read their own church's students.
+    match /players/{id} {
+      allow read: if signedIn() && (resource.data.parentUid == request.auth.uid || (isAdmin() && resource.data.churchId == adminChurch()));
+      allow delete: if signedIn() && resource.data.parentUid == request.auth.uid;
+      allow update: if signedIn() && resource.data.parentUid == request.auth.uid
+        && request.resource.data.parentUid == resource.data.parentUid
+        && request.resource.data.churchId == resource.data.churchId
+        && request.resource.data.parentEmail == resource.data.parentEmail;
+      allow create: if isInvited()
+        && request.resource.data.parentUid == request.auth.uid
+        && request.resource.data.parentEmail == myEmail()
+        && request.resource.data.churchId == inviteChurch();
+    }
+
+    // Church settings (Mass times). Admins edit their own church; invited parents read it.
+    match /churches/{id} {
+      allow read: if signedIn() && ((isAdmin() && id == adminChurch()) || (isInvited() && id == inviteChurch()));
+      allow write: if isAdmin() && id == adminChurch();
+    }
+
+    // Homework and messages. Admins write for their church; invited parents read their church's posts.
+    match /posts/{id} {
+      allow read: if signedIn() && ((isAdmin() && resource.data.churchId == adminChurch()) || (isInvited() && resource.data.churchId == inviteChurch()));
+      allow create: if isAdmin() && request.resource.data.churchId == adminChurch();
+      allow delete: if isAdmin() && resource.data.churchId == adminChurch();
+    }
+  }
+}
